@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="./leaflet.css" />
+    <script src="./leaflet.js"></script>
+    <style>
+        @font-face {
+            font-family: 'FZH';
+            src: url('../index_files/FZH.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'SHU';
+            src: url('../index_files/SHU.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #e8e8e8; }
+        #map { width: 100%; height: 100%; }
+        .license-plate {
+            display: inline-flex;
+            font-weight: bold;
+            font-size: 14px;
+            letter-spacing: 0;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            border: 1px solid #333;
+            vertical-align: middle;
+            align-items: stretch;
+            height: 22px;
+        }
+        .license-plate.yellow {
+            background-color: #FFD700;
+            color: #000000;
+        }
+        .license-plate.green {
+            background-color: #FFD700;
+            color: #000000;
+        }
+        .license-plate.green .license-char.yellow-bg {
+            background-color: #FFD700;
+            color: #000000;
+        }
+        .license-plate.green .license-char.green-bg {
+            background-color: #00A550;
+            color: #000000;
+        }
+        .license-char {
+            padding: 0 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            line-height: 1;
+            height: 100%;
+        }
+        .license-char.chinese {
+            font-family: 'FZH', sans-serif;
+            position: relative;
+            vertical-align: middle;
+            line-height: 1;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform: translateY(0.5px);
+        }
+        .license-char.alphanumeric {
+            font-family: 'SHU', monospace;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        var params = new URLSearchParams(window.location.search);
+        var mode = params.get("mode") || "single";
+
+        // BD-09（百度坐标系）转 GCJ-02（高德/国测局坐标系）
+        function bd09ToGcj02(bdLng, bdLat) {
+            var x = bdLng - 0.0065;
+            var y = bdLat - 0.006;
+            var z = Math.sqrt(x * x + y * y) - 0.00002 * Math.sin(y * Math.PI * 3000.0 / 180.0);
+            var theta = Math.atan2(y, x) - 0.000003 * Math.cos(x * Math.PI * 3000.0 / 180.0);
+            var ggLng = z * Math.cos(theta);
+            var ggLat = z * Math.sin(theta);
+            return { lng: ggLng, lat: ggLat };
+        }
+
+        // GCJ-02 转 WGS84（迭代近似法，用于 WGS84→GCJ-02 的逆向推导）
+        function gcj02ToWgs84(gcjLng, gcjLat) {
+            var dLat = -0.00002;
+            var dLng = -0.00005;
+            var m = { lng: gcjLng, lat: gcjLat };
+            for (var i = 0; i < 10; i++) {
+                var p = { lng: m.lng, lat: m.lat };
+                var q = wgs84ToGcj02Exact(p.lng, p.lat);
+                dLng = gcjLng - q.lng;
+                dLat = gcjLat - q.lat;
+                m = { lng: m.lng + dLng, lat: m.lat + dLat };
+            }
+            return m;
+        }
+
+        // WGS84→GCJ-02 精确公式
+        function wgs84ToGcj02Exact(wgLon, wgLat) {
+            var pi = 3.14159265358979324;
+            var a = 6378245.0;
+            var ee = 0.00669342162296594323;
+            var rad = pi / 180.0;
+            var dLat = transformLat(wgLon - 105.0, wgLat - 35.0);
+            var dLon = transformLon(wgLon - 105.0, wgLat - 35.0);
+            var radLat = wgLat * rad;
+            var magic = Math.sin(radLat);
+            magic = 1 - ee * magic * magic;
+            var sqrtMagic = Math.sqrt(magic);
+            dLat = (dLat * 180.0) / ((a * (1 - ee)) / (magic * sqrtMagic) * pi);
+            dLon = (dLon * 180.0) / ((a / sqrtMagic) * Math.cos(radLat) * pi);
+            return { lat: wgLat + dLat, lng: wgLon + dLon };
+        }
+
+        function transformLat(x, y) {
+            var pi = 3.14159265358979324;
+            var ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+            ret += (20.0 * Math.sin(6.0 * x * pi) + 20.0 * Math.sin(2.0 * x * pi)) * 2.0 / 3.0;
+            ret += (20.0 * Math.sin(y * pi) + 40.0 * Math.sin(y / 3.0 * pi)) * 2.0 / 3.0;
+            ret += (160.0 * Math.sin(y / 12.0 * pi) + 320.0 * Math.sin(y * pi / 30.0)) * 2.0 / 3.0;
+            return ret;
+        }
+
+        function transformLon(x, y) {
+            var pi = 3.14159265358979324;
+            var ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+            ret += (20.0 * Math.sin(6.0 * x * pi) + 20.0 * Math.sin(2.0 * x * pi)) * 2.0 / 3.0;
+            ret += (20.0 * Math.sin(x * pi) + 40.0 * Math.sin(x / 3.0 * pi)) * 2.0 / 3.0;
+            ret += (150.0 * Math.sin(x / 12.0 * pi) + 300.0 * Math.sin(x / 30.0 * pi)) * 2.0 / 3.0;
+            return ret;
+        }
+
+        // WGS84→GCJ-02（对外接口）
+        function wgs84ToGcj02(wgLon, wgLat) {
+            return wgs84ToGcj02Exact(wgLon, wgLat);
+        }
+
+        function createLicensePlateHTML(busId) {
+            if (!busId || typeof busId !== 'string') {
+                return busId;
+            }
+            var trimmedBusId = busId.trim();
+            var isNewEnergy = trimmedBusId.endsWith('D');
+            var plateClass = isNewEnergy ? 'license-plate green' : 'license-plate yellow';
+            var chars = trimmedBusId.split('');
+
+            function getCharClass(char, index, isNewEnergy) {
+                var baseClass = '';
+                var bgClass = '';
+                if (/[\u4e00-\u9fa5]/.test(char)) {
+                    baseClass = 'license-char chinese';
+                } else if (/[a-zA-Z0-9]/.test(char)) {
+                    baseClass = 'license-char alphanumeric';
+                } else {
+                    baseClass = 'license-char';
+                }
+                if (isNewEnergy) {
+                    if (index <= 1) {
+                        bgClass = ' yellow-bg';
+                    } else {
+                        bgClass = ' green-bg';
+                    }
+                }
+                return baseClass + bgClass;
+            }
+
+            var charElements = chars.map(function(char, index) {
+                var charClass = getCharClass(char, index, isNewEnergy);
+                return '<span class="' + charClass + '">' + char + '</span>';
+            }).join('');
+
+            return '<span class="' + plateClass + '">' + charElements + '</span>';
+        }
+
+        var singlePlateMarker = null;
+        var singleMap = null;
+        var multiMarkers = {};
+        var multiMap = null;
+
+        if (mode === "multi") {
+            var count = parseInt(params.get("count")) || 0;
+            var buses = [];
+            for (var i = 0; i < count; i++) {
+                var rawLat = parseFloat(params.get("busLat" + i));
+                var rawLng = parseFloat(params.get("busLng" + i));
+                var c = wgs84ToGcj02(rawLng, rawLat);
+                var rawDist = parseFloat(params.get("busDist" + i));
+                var distText = (!isNaN(rawDist) && rawDist > 0) ? (rawDist + "米") : (!isNaN(rawDist) && rawDist <= 0 ? "已到站" : "");
+                buses.push({
+                    lat: c.lat,
+                    lng: c.lng,
+                    busId: params.get("busId" + i) || "未知",
+                    endStation: params.get("endStation" + i) || "终点站",
+                    nextStation: params.get("nextStation" + i) || "未知",
+                    distanceText: distText,
+                    vehicleType: params.get("vehicleType" + i) || ""
+                });
+            }
+
+            var stations = [];
+            for (var j = 0; ; j++) {
+                var sLat = params.get("stationLat" + j);
+                var sLng = params.get("stationLng" + j);
+                var sName = params.get("stationName" + j);
+                if (sLat === null || sLng === null) break;
+                stations.push({
+                    lat: parseFloat(sLat),
+                    lng: parseFloat(sLng),
+                    name: sName || "站点"
+                });
+            }
+
+            // 站点坐标转换（BD-09 → GCJ-02）
+            stations.forEach(function(s) {
+                var c = bd09ToGcj02(s.lng, s.lat);
+                s.lat = c.lat;
+                s.lng = c.lng;
+            });
+
+            multiMap = L.map("map", {zoomControl: true, attributionControl: false});
+
+            if (!multiMap.getPane('stationPane')) {
+                multiMap.createPane('stationPane');
+                multiMap.getPane('stationPane').style.zIndex = '400';
+            }
+            var stationGroup = L.layerGroup().addTo(multiMap);
+
+            var validPoints = [];
+
+            stations.forEach(function(station) {
+                if (isNaN(station.lat) || isNaN(station.lng)) return;
+                validPoints.push([station.lat, station.lng]);
+                var stationIcon = L.divIcon({
+                    html: "<div style='width:10px;height:10px;background:#FF5722;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.4);'></div>",
+                    className: "",
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7]
+                });
+                var stationMarker = L.marker([station.lat, station.lng], {icon: stationIcon, pane: 'stationPane'});
+                stationMarker.bindPopup("<div style='font-size:14px;font-weight:bold;text-align:center;padding:4px;'>" + station.name + "</div>");
+                stationGroup.addLayer(stationMarker);
+            });
+
+            buses.forEach(function(bus) {
+                addOrUpdateBusMarker(bus, false);
+                validPoints.push([bus.lat, bus.lng]);
+            });
+
+            if (validPoints.length > 0) {
+                multiMap.fitBounds(validPoints, {padding: [50, 50]});
+            } else {
+                multiMap.setView([0, 0], 12);
+            }
+
+            L.tileLayer("https://webst0{s}.is.autonavi.com/appmaptile?style=7&x={x}&y={y}&z={z}", { subdomains: "1234", maxZoom: 19 }).addTo(multiMap);
+
+        } else {
+            var rawLat = parseFloat(params.get("lat"));
+            var rawLng = parseFloat(params.get("lng"));
+            var c = wgs84ToGcj02(rawLng, rawLat);
+            var lat = c.lat;
+            var lng = c.lng;
+            var busId = params.get("busId") || "未知车牌";
+            var endStation = params.get("endStation") || "终点站";
+            var nextStation = params.get("nextStation") || "未知";
+            var distance = parseFloat(params.get("distance"));
+            var distanceText = (!isNaN(distance) && distance > 0) ? (distance + "米") : (!isNaN(distance) && distance <= 0 ? "已到站" : "");
+            var vehicleType = params.get("vehicleType") || "";
+
+            singleMap = L.map("map", {zoomControl: true, attributionControl: false}).setView([lat, lng], 16);
+            L.tileLayer("https://webst0{s}.is.autonavi.com/appmaptile?style=7&x={x}&y={y}&z={z}", { subdomains: "1234", maxZoom: 19 }).addTo(singleMap);
+
+            var busHtml = createLicensePlateHTML(busId);
+            var busIcon = L.divIcon({
+                html: "<div class='bus-label' style='background:#fff;color:#000;border-radius:6px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ddd;'>" + busHtml + "</div>",
+                className: "",
+                iconSize: ["auto", "auto"],
+                iconAnchor: ["auto", 0]
+            });
+
+            singlePlateMarker = L.marker([lat, lng], {icon: busIcon}).addTo(singleMap);
+            var popupContent = "<div style='text-align:center;'><div style='font-size:14px;font-weight:bold;margin-bottom:6px;'>开往 " + endStation + "</div>" + (vehicleType ? "<div style='font-size:12px;color:#555;margin-bottom:4px;'>车型: " + vehicleType + "</div>" : "") + "<div style='font-size:12px;color:#666;margin-bottom:4px;'>下一站: " + nextStation + "</div>" + (distanceText ? "<div style='font-size:12px;color:#E64A19;font-weight:bold;'>" + distanceText + "</div>" : "") + "</div>";
+            singlePlateMarker.bindPopup(popupContent).openPopup();
+        }
+
+        function addOrUpdateBusMarker(bus, panTo) {
+            var busHtml = createLicensePlateHTML(bus.busId);
+            var busIcon = L.divIcon({
+                html: "<div class='bus-label' style='background:#fff;color:#000;border-radius:6px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ddd;'>" + busHtml + "</div>",
+                className: "",
+                iconSize: ["auto", "auto"],
+                iconAnchor: ["auto", 0]
+            });
+
+            var popupContent = "<div style='text-align:center;'><div style='font-size:14px;font-weight:bold;margin-bottom:6px;'>开往 " + bus.endStation + "</div>" + (bus.vehicleType ? "<div style='font-size:12px;color:#555;margin-bottom:4px;'>车型: " + bus.vehicleType + "</div>" : "") + "<div style='font-size:12px;color:#666;margin-bottom:4px;'>下一站: " + bus.nextStation + "</div>" + (bus.distanceText ? "<div style='font-size:12px;color:#E64A19;font-weight:bold;'>" + bus.distanceText + "</div>" : "") + "</div>";
+
+            if (multiMarkers[bus.busId]) {
+                multiMarkers[bus.busId].setLatLng([bus.lat, bus.lng]);
+                multiMarkers[bus.busId].setIcon(busIcon);
+                multiMarkers[bus.busId].setPopupContent(popupContent);
+            } else {
+                var marker = L.marker([bus.lat, bus.lng], {icon: busIcon}).addTo(multiMap);
+                marker.bindPopup(popupContent);
+                multiMarkers[bus.busId] = marker;
+            }
+
+            if (panTo && multiMap) {
+                multiMap.setView([bus.lat, bus.lng], multiMap.getZoom());
+            }
+        }
+
+        window.addEventListener('message', function(event) {
+            var data = event.data;
+            if (!data || !data.type) return;
+
+            if (data.type === 'refreshSingle') {
+                if (singlePlateMarker) {
+                    var c = wgs84ToGcj02(data.lng, data.lat);
+                    singlePlateMarker.setLatLng([c.lat, c.lng]);
+                    if (data.nextStation) {
+                        var distVal = parseFloat(data.distance);
+                        var distText = (!isNaN(distVal) && distVal > 0) ? (distVal + "米") : (!isNaN(distVal) && distVal <= 0 ? "已到站" : "");
+                        var popup = "<div style='text-align:center;'><div style='font-size:14px;font-weight:bold;margin-bottom:6px;'>开往 " + (data.endStation || '终点站') + "</div>" + (data.vehicleType ? "<div style='font-size:12px;color:#555;margin-bottom:4px;'>车型: " + data.vehicleType + "</div>" : "") + "<div style='font-size:12px;color:#666;margin-bottom:4px;'>下一站: " + data.nextStation + "</div>" + (distText ? "<div style='font-size:12px;color:#E64A19;font-weight:bold;'>" + distText + "</div>" : "") + "</div>";
+                        singlePlateMarker.setPopupContent(popup);
+                    }
+                }
+                if (singleMap) {
+                    var c = wgs84ToGcj02(data.lng, data.lat);
+                    singleMap.setView([c.lat, c.lng], singleMap.getZoom());
+                }
+                event.source.postMessage({ type: 'refreshDone', busId: data.busId }, event.origin);
+            }
+
+            if (data.type === 'refreshMulti') {
+                if (data.buses && Array.isArray(data.buses)) {
+                    data.buses.forEach(function(bus) {
+                        var c = wgs84ToGcj02(bus.lng, bus.lat);
+                        var distVal = parseFloat(bus.distance);
+                        var distText = (!isNaN(distVal) && distVal > 0) ? (distVal + "米") : (!isNaN(distVal) && distVal <= 0 ? "已到站" : "");
+                        addOrUpdateBusMarker({
+                            busId: bus.busId,
+                            lat: c.lat,
+                            lng: c.lng,
+                            endStation: bus.endStation,
+                            nextStation: bus.nextStation,
+                            distanceText: distText,
+                            vehicleType: bus.vehicleType || ""
+                        }, false);
+                    });
+                    if (data.needsFitBounds) {
+                        var allPoints = [];
+                        Object.keys(multiMarkers).forEach(function(busId) {
+                            var m = multiMarkers[busId];
+                            if (m) {
+                                var latlng = m.getLatLng();
+                                allPoints.push([latlng.lat, latlng.lng]);
+                            }
+                        });
+                        if (allPoints.length > 0) {
+                            multiMap.fitBounds(allPoints, {padding: [50, 50]});
+                        }
+                    }
+                }
+                event.source.postMessage({ type: 'refreshDone', count: data.buses ? data.buses.length : 0 }, event.origin);
+            }
+        });
+
+        window.parent.postMessage({ type: 'mapReady' }, '*');
+    </script>
+</body>
+</html>
