@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>车牌生成器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-1: #1a1a2e;
+            --bg-2: #16213e;
+            --bg-3: #0f3460;
+            --primary: #0f3460;
+            --primary-light: #1a5276;
+            --primary-lighter: #2471a3;
+            --primary-dark: #0a2647;
+            --primary-alpha: rgba(15, 52, 96, 0.35);
+        }
+
+        .theme-blue {
+            --bg-1: #1a1a2e;
+            --bg-2: #16213e;
+            --bg-3: #0f3460;
+            --primary: #0f3460;
+            --primary-light: #1a5276;
+            --primary-lighter: #2471a3;
+            --primary-dark: #0a2647;
+            --primary-alpha: rgba(15, 52, 96, 0.35);
+        }
+        .theme-yellow {
+            --bg-1: #2c2018;
+            --bg-2: #3d2a10;
+            --bg-3: #5a3d0a;
+            --primary: #b8860b;
+            --primary-light: #d4a017;
+            --primary-lighter: #e6b800;
+            --primary-dark: #8b6508;
+            --primary-alpha: rgba(184, 134, 11, 0.35);
+        }
+        .theme-green {
+            --bg-1: #0a1f14;
+            --bg-2: #0d3320;
+            --bg-3: #0d4a2c;
+            --primary: #0d8050;
+            --primary-light: #10a368;
+            --primary-lighter: #14c67a;
+            --primary-dark: #096640;
+            --primary-alpha: rgba(13, 128, 80, 0.35);
+        }
+        .theme-white {
+            --bg-1: #e8e8e8;
+            --bg-2: #d0d0d0;
+            --bg-3: #b8b8b8;
+            --primary: #555;
+            --primary-light: #777;
+            --primary-lighter: #999;
+            --primary-dark: #333;
+            --primary-alpha: rgba(85, 85, 85, 0.25);
+        }
+        .theme-black {
+            --bg-1: #1a1a1a;
+            --bg-2: #2a2a2a;
+            --bg-3: #3a3a3a;
+            --primary: #333;
+            --primary-light: #555;
+            --primary-lighter: #777;
+            --primary-dark: #111;
+            --primary-alpha: rgba(51, 51, 51, 0.35);
+        }
+
+        body {
+            font-family: "DIN", "FZH", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 50%, var(--bg-3) 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            transition: background 0.5s ease;
+        }
+
+        .main-card {
+            background: #ffffff;
+            border-radius: 24px;
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 500px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            padding: 28px 24px 20px;
+            text-align: center;
+            transition: background 0.5s ease;
+        }
+
+        .card-header h1 {
+            color: #fff;
+            font-size: 1.5em;
+            font-weight: 600;
+            letter-spacing: 3px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .card-header p {
+            color: rgba(255,255,255,0.7);
+            font-size: 0.8em;
+            margin-top: 6px;
+            letter-spacing: 1px;
+        }
+
+        .card-body {
+            padding: 32px 28px;
+        }
+
+        /* 车牌类型选择 */
+        .section-title {
+            font-size: 0.85em;
+            color: #495057;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 3px;
+            height: 14px;
+            background: var(--primary);
+            border-radius: 2px;
+            transition: background 0.5s ease;
+        }
+
+        .type-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .type-btn {
+            padding: 10px 4px;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            background: #fff;
+            cursor: pointer;
+            font-size: 0.8em;
+            font-weight: 500;
+            color: #495057;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .type-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+            transform: translateY(-1px);
+        }
+
+        .type-btn.active {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: #fff;
+            box-shadow: 0 4px 12px var(--primary-alpha);
+        }
+
+        /* 车牌输入区 */
+        .input-section {
+            margin-bottom: 28px;
+        }
+
+        .plate-input-row {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .plate-select {
+            width: 38px;
+            height: 52px;
+            font-size: 1.4em;
+            text-align: center;
+            text-transform: uppercase;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            background: #fff;
+            cursor: pointer;
+            font-family: "DIN", "FZH", "Arial", sans-serif;
+            font-weight: 700;
+            padding: 0;
+            appearance: none;
+            -webkit-appearance: none;
+            transition: all 0.2s ease;
+        }
+
+        .plate-select:hover,
+        .plate-select:focus {
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 0 0 0 3px var(--primary-alpha);
+        }
+
+        .plate-select.province {
+            background: var(--primary);
+            color: #fff;
+            border-color: var(--primary-dark);
+        }
+
+        .plate-select.letter {
+            background: var(--primary);
+            color: #fff;
+            border-color: var(--primary-dark);
+        }
+
+        .plate-select:focus {
+            box-shadow: 0 0 0 3px var(--primary-alpha);
+        }
+
+        .plate-input-cell {
+            width: 38px;
+            height: 52px;
+            font-size: 1.4em;
+            text-align: center;
+            text-transform: uppercase;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            background: #fff;
+            font-family: "DIN", "FZH", "Arial", sans-serif;
+            font-weight: 700;
+            transition: all 0.2s ease;
+        }
+
+        .plate-input-cell:focus {
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 0 0 0 3px var(--primary-alpha);
+        }
+
+        .plate-input-cell.hidden {
+            display: none;
+        }
+
+        .plate-input-cell.letter-only {
+            color: var(--primary);
+        }
+
+        .plate-input-cell.letter-only::placeholder {
+            color: var(--primary-alpha);
+        }
+
+        /* 生成按钮 */
+        .generate-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.05em;
+            font-weight: 600;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: inherit;
+            box-shadow: 0 6px 20px var(--primary-alpha);
+        }
+
+        .generate-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px var(--primary-alpha);
+            background: linear-gradient(135deg, var(--primary-light), var(--primary-lighter));
+        }
+
+        .generate-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 4px 15px var(--primary-alpha);
+        }
+
+        .generate-btn:disabled {
+            background: #ccc;
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .generate-btn .btn-hint {
+            font-size: 0.75em;
+            font-weight: 400;
+            opacity: 0.8;
+            display: block;
+            margin-top: 2px;
+        }
+
+        /* 隐藏原生select */
+        #plate-type {
+            display: none;
+        }
+
+        /* 响应式 */
+        @media (max-width: 400px) {
+            .type-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+
+            .plate-select,
+            .plate-input-cell {
+                width: 32px;
+                height: 46px;
+                font-size: 1.2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="main-card">
+        <div class="card-header">
+            <h1>车牌生成器</h1>
+            <p>Plate Generator</p>
+        </div>
+        <div class="card-body">
+            <!-- 车牌类型 -->
+            <div class="section-title">车牌种类</div>
+            <div class="type-grid" id="type-grid">
+                <button class="type-btn active" data-value="0">蓝牌</button>
+                <button class="type-btn" data-value="1">黄牌单层</button>
+                <button class="type-btn" data-value="1d">黄牌双层</button>
+                <button class="type-btn" data-value="4">纯绿</button>
+                <button class="type-btn" data-value="6">黄绿</button>
+                <button class="type-btn" data-value="2">白牌</button>
+                <button class="type-btn" data-value="3">黑牌</button>
+            </div>
+
+            <!-- 车牌输入 -->
+            <div class="input-section">
+                <div class="section-title">输入车牌</div>
+                <div class="plate-input-row">
+                    <select id="province-select" class="plate-select province">
+                        <option value="京">京</option>
+                        <option value="津">津</option>
+                        <option value="沪">沪</option>
+                        <option value="渝">渝</option>
+                        <option value="冀">冀</option>
+                        <option value="豫">豫</option>
+                        <option value="云">云</option>
+                        <option value="辽">辽</option>
+                        <option value="黑">黑</option>
+                        <option value="湘">湘</option>
+                        <option value="皖">皖</option>
+                        <option value="鲁">鲁</option>
+                        <option value="新">新</option>
+                        <option value="苏" selected>苏</option>
+                        <option value="浙">浙</option>
+                        <option value="赣">赣</option>
+                        <option value="鄂">鄂</option>
+                        <option value="桂">桂</option>
+                        <option value="甘">甘</option>
+                        <option value="晋">晋</option>
+                        <option value="蒙">蒙</option>
+                        <option value="陕">陕</option>
+                        <option value="吉">吉</option>
+                        <option value="闽">闽</option>
+                        <option value="贵">贵</option>
+                        <option value="粤">粤</option>
+                        <option value="青">青</option>
+                        <option value="藏">藏</option>
+                        <option value="川">川</option>
+                        <option value="宁">宁</option>
+                        <option value="琼">琼</option>
+                    </select>
+                    <select id="letter-select" class="plate-select letter">
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                        <option value="D">D</option>
+                        <option value="E">E</option>
+                        <option value="F">F</option>
+                        <option value="G">G</option>
+                        <option value="H">H</option>
+                        <option value="J">J</option>
+                        <option value="K">K</option>
+                        <option value="L">L</option>
+                        <option value="M">M</option>
+                        <option value="N">N</option>
+                        <option value="P">P</option>
+                        <option value="Q">Q</option>
+                        <option value="R">R</option>
+                        <option value="S">S</option>
+                        <option value="T">T</option>
+                        <option value="U">U</option>
+                        <option value="V">V</option>
+                        <option value="W">W</option>
+                        <option value="X">X</option>
+                        <option value="Y">Y</option>
+                        <option value="Z">Z</option>
+                    </select>
+                    <input class="plate-input-cell" type="text" maxlength="1" data-index="0" inputmode="text" autocomplete="off" placeholder="-">
+                    <input class="plate-input-cell" type="text" maxlength="1" data-index="1" inputmode="text" autocomplete="off" placeholder="-">
+                    <input class="plate-input-cell" type="text" maxlength="1" data-index="2" inputmode="text" autocomplete="off" placeholder="-">
+                    <input class="plate-input-cell" type="text" maxlength="1" data-index="3" inputmode="text" autocomplete="off" placeholder="-">
+                    <input class="plate-input-cell" type="text" maxlength="1" data-index="4" inputmode="text" autocomplete="off" placeholder="-">
+                    <input class="plate-input-cell" type="text" maxlength="1" data-index="5" inputmode="text" autocomplete="off" placeholder="-">
+                </div>
+            </div>
+
+            <!-- 生成按钮 -->
+            <button type="button" class="generate-btn" id="generate-btn" disabled>
+                生成车牌图片
+                <span class="btn-hint" id="btn-hint">请输入完整车牌</span>
+            </button>
+
+            <!-- 备注 -->
+            <p style="margin-top: 16px; font-size: 0.75em; color: #999; text-align: center; line-height: 1.5;">
+                请在下一界面自行截图保存，本APP不承担任何法律责任。
+            </p>
+
+            <!-- 隐藏原生select -->
+            <select id="plate-type" style="display:none">
+                <option value="0">蓝牌</option>
+                <option value="1">黄牌【单层】</option>
+                <option value="1d">黄牌【双层】</option>
+                <option value="4">纯绿</option>
+                <option value="6">黄绿</option>
+                <option value="2">白牌</option>
+                <option value="3">黑牌</option>
+            </select>
+        </div>
+    </div>
+
+<script>
+const BASE_URL = 'http://new.hdsxsc.com:10086/server.php';
+
+const PLATE_MAX_LENGTH = {
+    "0": 5,   // 蓝牌
+    "1": 5,   // 黄牌单层
+    "1d": 5,  // 黄牌双层
+    "4": 6,   // 纯绿
+    "6": 6,   // 黄绿
+    "2": 5,   // 白牌
+    "3": 5    // 黑牌
+};
+
+function getPlateLength(type) {
+    return PLATE_MAX_LENGTH[type] || 5;
+}
+
+function getPlateValue() {
+    const province = document.getElementById('province-select').value;
+    const letter = document.getElementById('letter-select').value;
+    const cells = document.querySelectorAll('.plate-input-cell');
+    let val = province + letter;
+    cells.forEach(cell => {
+        if (!cell.classList.contains('hidden')) {
+            val += cell.value.toUpperCase();
+        }
+    });
+    return val;
+}
+
+function updateCellState() {
+    const type = document.getElementById('plate-type').value;
+    const maxLen = getPlateLength(type);
+    const cells = document.querySelectorAll('.plate-input-cell');
+    cells.forEach((cell, index) => {
+        cell.classList.remove('letter-only');
+        if (index < maxLen) {
+            cell.classList.remove('hidden');
+            cell.removeAttribute('disabled');
+            // 纯绿牌第一位是字母
+            if (type === '4' && index === 0) {
+                cell.classList.add('letter-only');
+            }
+            // 黄绿牌最后一位是字母
+            if (type === '6' && index === maxLen - 1) {
+                cell.classList.add('letter-only');
+            }
+        } else {
+            cell.classList.add('hidden');
+            cell.value = '';
+            cell.setAttribute('disabled', 'disabled');
+        }
+    });
+    sessionStorage.setItem('plateType', type);
+    updateTypeButtons(type);
+    updateTheme(type);
+    checkPlateComplete();
+}
+
+function updateTheme(type) {
+    const body = document.body;
+    const themeMap = {
+        '0': 'theme-blue',
+        '1': 'theme-yellow',
+        '1d': 'theme-yellow',
+        '2': 'theme-white',
+        '3': 'theme-black',
+        '4': 'theme-green',
+        '6': 'theme-green'
+    };
+    const theme = themeMap[type] || 'theme-blue';
+    body.className = theme;
+}
+
+function updateTypeButtons(type) {
+    document.querySelectorAll('.type-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === type);
+    });
+}
+
+function restorePlateType() {
+    const savedType = sessionStorage.getItem('plateType');
+    if (savedType) {
+        document.getElementById('plate-type').value = savedType;
+        updateTypeButtons(savedType);
+        updateTheme(savedType);
+    }
+}
+
+function checkPlateComplete() {
+    const type = document.getElementById('plate-type').value;
+    const maxLen = getPlateLength(type);
+    const cells = document.querySelectorAll('.plate-input-cell');
+    const btn = document.getElementById('generate-btn');
+    const hint = document.getElementById('btn-hint');
+
+    let allFilled = true;
+    let invalidLetter = false;
+    const letterRegex = /^[A-Z]$/i;
+
+    for (let i = 0; i < maxLen; i++) {
+        const cell = cells[i];
+        const value = cell.value.trim();
+
+        if (!value) {
+            allFilled = false;
+            break;
+        }
+
+        // 纯绿牌第一位必须是字母
+        if (type === '4' && i === 0 && !letterRegex.test(value)) {
+            invalidLetter = true;
+        }
+        // 黄绿牌最后一位必须是字母
+        if (type === '6' && i === maxLen - 1 && !letterRegex.test(value)) {
+            invalidLetter = true;
+        }
+    }
+
+    if (invalidLetter) {
+        btn.disabled = true;
+        hint.textContent = '该位置必须输入字母';
+    } else if (!allFilled) {
+        btn.disabled = true;
+        hint.textContent = '请输入完整车牌';
+    } else {
+        btn.disabled = false;
+        hint.textContent = '';
+    }
+}
+
+function generatePlate() {
+    if (document.getElementById('generate-btn').disabled) return;
+    const plate = getPlateValue();
+    const type = document.getElementById('plate-type').value;
+
+    let url = BASE_URL + '?cphm=' + encodeURIComponent(plate) + '&cpys=' + type;
+
+    if (type === '1d') {
+        url = BASE_URL + '?cphm=' + encodeURIComponent(plate) + '&cpys=1&double=1';
+    }
+
+    window.open(url, '_blank');
+}
+
+function initInputCells() {
+    const cells = document.querySelectorAll('.plate-input-cell');
+    cells.forEach((cell, index) => {
+        cell.addEventListener('input', () => {
+            // 限制纯绿第一位和黄绿最后一位只能输入字母
+            const type = document.getElementById('plate-type').value;
+            const maxLen = getPlateLength(type);
+            if ((type === '4' && index === 0) || (type === '6' && index === maxLen - 1)) {
+                cell.value = cell.value.replace(/[^a-zA-Z]/g, '').toUpperCase();
+            }
+            checkPlateComplete();
+            if (cell.value.length === 1) {
+                const next = cells[index + 1];
+                if (next && !next.classList.contains('hidden')) {
+                    next.focus();
+                }
+            }
+        });
+        cell.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && cell.value === '' && index > 0) {
+                const prev = cells[index - 1];
+                if (prev && !prev.classList.contains('hidden')) {
+                    prev.value = '';
+                    prev.focus();
+                }
+            }
+        });
+    });
+}
+
+window.onload = function() {
+    restorePlateType();
+    updateCellState();
+    initInputCells();
+    checkPlateComplete();
+
+    // 类型按钮点击
+    document.querySelectorAll('.type-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.getElementById('plate-type').value = btn.dataset.value;
+            updateCellState();
+            checkPlateComplete();
+        });
+    });
+
+    document.getElementById('generate-btn').addEventListener('click', generatePlate);
+};
+</script>
+</body>
+</html>
