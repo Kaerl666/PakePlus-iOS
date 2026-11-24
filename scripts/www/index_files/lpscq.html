@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>路牌生成器</title>
+  <style>
+    :root {
+      --blue: #5059a8;
+      --fs-base: clamp(1.2vh, 2vh, 2.4vh); /* 全局随高度自适应字号（仅用vh） */
+      --badge-bg: #ffffff;
+      --badge-text: #5059a8;
+      --stations-text: #000000;
+      --selected-bg: #ff0000;
+      --side-text: #5059a8;
+    }
+    @font-face {
+      font-family: "FZD";
+      src: url("./FZD.ttf") format("truetype");
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "FZH";
+      src: url("./FZH.ttf") format("truetype");
+      font-display: swap;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #e9e9e9;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      font-size: var(--fs-base);
+    }
+    .sign {
+      height: 100vh;
+      width: min(calc(100vh / 5), 100vw);
+      aspect-ratio: 1 / 4.9;
+      display: flex;
+      flex-direction: column;
+    }
+    .header {
+      position: relative;
+      height: 19%;
+      background: var(--blue);
+      border: 0.35vh solid var(--blue);
+      border-bottom: none;
+      overflow: hidden;
+    }
+    .badge {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(0%, -50%);
+      width: 40%; /* scaled down proportionally */
+      aspect-ratio: 1 / 1.7; /* keep shape ratio */
+      background: var(--badge-bg);
+      border-radius: 999px; /* fully rounded ends */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .badge-text {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      white-space: nowrap;
+      font-size: 300%;
+      font-weight: 400;
+      color: var(--badge-text);
+      font-family: "FZD", sans-serif;
+      transform: rotate(90deg); /* 竖排并朝向右侧（反向180°） */
+    }
+    .header-info {
+      position: absolute;
+      top: 29%;
+      left: -5%;
+      transform: rotate(90deg);
+      transform-origin: center;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      color: #fff;
+      font-family: "FZD", sans-serif;
+      font-size: 100%;
+      font-weight: 400;
+      line-height: 1.5; /* 增大行间距 */
+      white-space: pre-line; /* 保留换行 */
+      text-align: left; /* 让首/末字左对齐 */
+    }
+    .content-row {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+    .main-panel {
+      position: relative;
+      flex: 1;
+      background: #fff;
+      border: 0.35vh solid var(--blue);
+      border-right: none;
+    }
+    .main-panel::before {
+      content: "";
+      position: absolute;
+      top: 0.5%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 15%;
+      aspect-ratio: 2 / 3;
+      background: var(--blue);
+      clip-path: polygon(0 0, 100% 0, 50% 100%);
+    }
+    .stations {
+      position: absolute;
+      top: 8%;      /* 整体再上移 */
+      bottom: 3%;  /* 末站下移一些 */
+      left: 16%;    /* 再右移 */
+      right: -5%;   /* 增加宽度 */
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between; /* 首末站贴边，中间自适应空隙 */
+      gap: 0;
+      color: var(--stations-text);
+      font-family: "FZH", sans-serif;
+      font-size: 0.85em; /* 略缩小站名字号，仍随高度自适应 */
+      line-height: 1.2;
+    }
+    .stations > div {
+      display: flex;
+      flex-direction: row-reverse; /* 保持左朝向时顺序正确 */
+      width: 100%;
+      gap: 0;
+      justify-content: space-between; /* 首末字占两端，中间自适应 */
+      align-items: flex-start;
+      white-space: nowrap; /* 禁止换行 */
+    }
+    .stations > div:first-child {
+      margin-top: -1vh; /* 首站上移 */
+    }
+    .stations > div span {
+      display: inline-block;
+    }
+    .stations > div span.cn {
+      transform: rotate(90deg); /* 仅中文旋转 */
+      transform-origin: left top;
+    }
+    .stations > div span:not(.cn) {
+      transform: rotate(180deg); /* 其他字符旋转180度 */
+      transform-origin: center;
+    }
+    .stations > div.selected {
+      position: relative;
+      padding: 0;
+      isolation: isolate;
+    }
+    .stations > div.selected span {
+      color: #fff;
+    }
+    .stations > div.selected::after {
+      content: "";
+      position: absolute;
+      inset: -0.2vh 1.5vh 0.1vh -1.9vh; /* 更向左外扩，且不占用布局 */
+      border-radius: 0.6vh;
+      background: var(--selected-bg); /* 实心底色 */
+      box-shadow: inset 0 0 0 0.35vh var(--selected-bg);
+      pointer-events: none; /* 不影响布局与交互 */
+      z-index: -1; /* 放在文字后，既不遮挡也不被遮住 */
+    }
+    .main-panel::after {
+      content: "";
+      position: absolute;
+      top: 0.5%;
+      left: 50%;
+      transform: translate(-50%, -0.1vh); /* 微向上覆盖，避免蓝线漏出 */
+      width: 18%;
+      aspect-ratio: 20 / 9; /* same width, 1/5 the height of ::before */
+      background: #fff;
+      clip-path: polygon(0 0, 100% 0, 50% 100%);
+      z-index: 1;
+    }
+    .side-bar {
+      width: 20%;
+      background: #fff;
+      border: 0.35vh solid var(--blue);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .side-info {
+      position: absolute;
+      top: 40%;
+      left: 85%;
+      transform: translate(-50%, 0) rotate(90deg);
+      transform-origin: top center;
+      font-family: "FZD", sans-serif;
+      font-size: 120%;
+      font-weight: 400;
+      color: var(--side-text);
+      white-space: nowrap;
+      text-align: left; /* 保持上（左）对齐 */
+    }
+    .side-info.fare {
+      top: 87%; /* 靠上显示票价信息 */
+      font-size: 60%;
+      transform: translate(-50%, 0) rotate(90deg);
+    }
+    .side-info.fare.unit {
+      top: 96%;
+      left: 65%;
+      transform: translate(-50%, 0) rotate(90deg);
+    }
+    .side-info.route {
+      top: 92%; /* 与主侧文同大小，靠上放置 */
+      font-size: 120%;
+      transform: translate(-50%, 0) rotate(90deg); /* 去掉压缩 */
+      transform-origin: top center;
+    }
+    /* 设置抽屉 */
+    .settings-toggle {
+      position: fixed;
+      top: 2vh;
+      right: 2vh;
+      padding: 1vh 2vh;
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 1vh;
+      font-family: "FZD", sans-serif;
+      font-size: 1em;
+      cursor: pointer;
+      z-index: 200;
+    }
+    .settings-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 38vh;
+      height: 100vh;
+      background: #f5f6fb;
+      box-shadow: -0.6vh 0 1.4vh rgba(0, 0, 0, 0.15);
+      transform: translateX(100%);
+      transition: transform 0.25s ease;
+      padding: 3vh 3vh 6vh;
+      display: flex;
+      flex-direction: column;
+      gap: 2vh;
+      z-index: 150;
+      font-family: "FZH", sans-serif;
+      font-size: 1em;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    .settings-panel.open {
+      transform: translateX(0);
+    }
+    .settings-panel h3 {
+      margin: 0;
+      font-size: 1.1em;
+      color: var(--blue);
+    }
+    .settings-panel label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.8vh;
+      font-size: 0.95em;
+      color: #333;
+    }
+    .settings-panel input,
+    .settings-panel textarea {
+      width: 100%;
+      padding: 1vh;
+      border: 0.25vh solid #d2d6e4;
+      border-radius: 0.8vh;
+      font-family: "FZH", sans-serif;
+      font-size: 1em;
+      resize: vertical;
+      min-height: 4vh;
+    }
+    .settings-panel textarea {
+      min-height: 14vh;
+    }
+    .settings-panel .row {
+      display: flex;
+      gap: 1vh;
+    }
+    .settings-panel button.apply {
+      padding: 1vh 2vh;
+      background: var(--blue);
+      color: #fff;
+      border: none;
+      border-radius: 0.8vh;
+      cursor: pointer;
+      font-family: "FZD", sans-serif;
+      font-size: 1em;
+      position: sticky;
+      bottom: 3vh;
+      align-self: stretch;
+    }
+  </style>
+</head>
+<body>
+  <div class="sign">
+    <div class="header">
+        <div class="header-info">首班：6:00<br>末班：19:00</div>
+        <div class="badge">
+          <span class="badge-text">1路</span>
+        </div>
+    </div>
+    <div class="content-row">
+      <div class="main-panel">
+        <div class="stations"></div>
+      </div>
+        <div class="side-bar">
+          <div class="side-info route">2-4</div>
+          <div class="side-info fare">票价：</div>
+          <div class="side-info fare unit">元</div>
+          <div class="side-info main">开往：墟沟站　　　下一站：人民医院</div>
+        </div>
+    </div>
+  </div>
+  <button class="settings-toggle" id="toggleSettings">设置</button>
+  <div class="settings-panel" id="settingsPanel">
+    <h3>线路设置</h3>
+    <label>线路名
+      <input id="lineNameInput" placeholder="如：1路/2-4" />
+    </label>
+    <label>当前站
+      <select id="currentStationSelect"></select>
+    </label>
+    <div class="row">
+      <label style="flex:1">首班时间
+        <input id="firstTimeInput" placeholder="6:00" />
+      </label>
+      <label style="flex:1">末班时间
+        <input id="lastTimeInput" placeholder="19:00" />
+      </label>
+    </div>
+    <div class="row">
+      <label style="flex:1">票价（数值）
+        <input id="fareInput" placeholder="2-4" />
+      </label>
+      <label style="flex:1">票价单位
+        <input id="fareUnitInput" placeholder="元" />
+      </label>
+    </div>
+    <label>站点列表（每行一个，可直接增删改）
+      <textarea id="stationsInput" placeholder="每行一个站名"></textarea>
+    </label>
+    <h3>颜色设置</h3>
+    <div class="row">
+      <label style="flex:1">主色（--blue）
+        <input type="color" id="colorBluePicker" />
+        <input id="colorBlueHex" placeholder="#5059a8" />
+      </label>
+      <label style="flex:1">线路底色
+        <input type="color" id="colorBadgeBgPicker" />
+        <input id="colorBadgeBgHex" placeholder="#ffffff" />
+      </label>
+    </div>
+    <div class="row">
+      <label style="flex:1">线路文字色
+        <input type="color" id="colorBadgeTextPicker" />
+        <input id="colorBadgeTextHex" placeholder="#5059a8" />
+      </label>
+      <label style="flex:1">顶栏文字色
+        <input type="color" id="colorSideTextPicker" />
+        <input id="colorSideTextHex" placeholder="#5059a8" />
+      </label>
+    </div>
+    <div class="row">
+      <label style="flex:1">站名文字色
+        <input type="color" id="colorStationsPicker" />
+        <input id="colorStationsHex" placeholder="#000000" />
+      </label>
+      <label style="flex:1">当前站文字色
+        <input type="color" id="colorSelectedPicker" />
+        <input id="colorSelectedHex" placeholder="#ff0000" />
+      </label>
+    </div>
+    <button class="apply" id="applySettings">应用到路牌</button>
+  </div>
+  <script>
+    const state = {
+      lineName: "1K",
+      firstTime: "8:00",
+      lastTime: "20:00",
+      fare: "2-4", /* 票价数值直接显示在侧栏小字 */
+      fareUnit: "元",
+      selectedStation: 0,
+      stations: [
+        "宋跳",
+        "东方之珠",
+        "旺旺家园",
+        "凌洲广场",
+        "龙河广场",
+        "新贵都",
+        "海州区法院",
+        "爱慕低",
+        "石棚名居",
+        "南园新村",
+        "白虎山村",
+        "西门首末站",
+      ],
+    };
+
+    const lineNameInput = document.getElementById("lineNameInput");
+    const firstTimeInput = document.getElementById("firstTimeInput");
+    const lastTimeInput = document.getElementById("lastTimeInput");
+    const fareInput = document.getElementById("fareInput");
+    const fareUnitInput = document.getElementById("fareUnitInput");
+    const stationsInput = document.getElementById("stationsInput");
+    const currentStationSelect = document.getElementById("currentStationSelect");
+    const applyBtn = document.getElementById("applySettings");
+    const toggleBtn = document.getElementById("toggleSettings");
+    const settingsPanel = document.getElementById("settingsPanel");
+
+    const badgeEl = document.querySelector(".badge-text");
+    const headerInfoEl = document.querySelector(".header-info");
+    const sideRouteEl = document.querySelector(".side-info.route");
+    const sideFareEl = document.querySelector(".side-info.fare");
+    const sideFareUnitEl = document.querySelector(".side-info.fare.unit");
+    const sideMainEl = document.querySelector(".side-info.main");
+    const stationsEl = document.querySelector(".stations");
+    // color controls
+    const colorBluePicker = document.getElementById('colorBluePicker');
+    const colorBlueHex = document.getElementById('colorBlueHex');
+    const colorBadgeBgPicker = document.getElementById('colorBadgeBgPicker');
+    const colorBadgeBgHex = document.getElementById('colorBadgeBgHex');
+    const colorBadgeTextPicker = document.getElementById('colorBadgeTextPicker');
+    const colorBadgeTextHex = document.getElementById('colorBadgeTextHex');
+    const colorSideTextPicker = document.getElementById('colorSideTextPicker');
+    const colorSideTextHex = document.getElementById('colorSideTextHex');
+    const colorStationsPicker = document.getElementById('colorStationsPicker');
+    const colorStationsHex = document.getElementById('colorStationsHex');
+    const colorSelectedPicker = document.getElementById('colorSelectedPicker');
+    const colorSelectedHex = document.getElementById('colorSelectedHex');
+
+    function isChinese(char) {
+      return /[\u4e00-\u9fff]/.test(char);
+    }
+    function sanitizeStationName(name) {
+      const chars = Array.from(name).filter((ch) => /[\p{L}\p{N}]/u.test(ch)); // 仅保留字母数字（含中文）
+      return chars.slice(0, 8).join(""); // 最长8个字符
+    }
+
+    function renderStations() {
+      stationsEl.innerHTML = "";
+      state.stations.forEach((name, idx) => {
+        const row = document.createElement("div");
+        const chars = Array.from(name);
+        chars.forEach((ch) => {
+          const span = document.createElement("span");
+          span.textContent = ch;
+          if (isChinese(ch)) {
+            span.classList.add("cn");
+          }
+          row.appendChild(span);
+        });
+        // 首站单独上移以保持视觉
+        if (stationsEl.children.length === 0) {
+          row.style.marginTop = "-1vh";
+        }
+        if (idx === state.selectedStation) {
+          row.classList.add("selected");
+        }
+        stationsEl.appendChild(row);
+      });
+      // 根据站数调整对齐：首末贴边，中间均分
+      stationsEl.style.justifyContent = "space-between";
+    }
+
+    // color utilities
+    function normalizeHex(input) {
+      if (!input) return null;
+      let v = input.trim();
+      if (!v.startsWith('#')) v = '#' + v;
+      if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v)) return v;
+      return null;
+    }
+    function setColorVar(varName, hex) {
+      if (!hex) return;
+      document.documentElement.style.setProperty(varName, hex);
+    }
+    function initColors() {
+      const root = getComputedStyle(document.documentElement);
+      const get = (name, fallback) => (root.getPropertyValue(name) || fallback).trim() || fallback;
+      const blue = get('--blue', '#5059a8');
+      const badgeBg = get('--badge-bg', '#ffffff');
+      const badgeText = get('--badge-text', '#5059a8');
+      const sideText = get('--side-text', '#5059a8');
+      const stations = get('--stations-text', '#000000');
+      const selected = get('--selected-bg', '#ff0000');
+
+      colorBluePicker.value = blue;
+      colorBlueHex.value = blue;
+      colorBadgeBgPicker.value = badgeBg;
+      colorBadgeBgHex.value = badgeBg;
+      colorBadgeTextPicker.value = badgeText;
+      colorBadgeTextHex.value = badgeText;
+      colorSideTextPicker.value = sideText;
+      colorSideTextHex.value = sideText;
+      colorStationsPicker.value = stations;
+      colorStationsHex.value = stations;
+      colorSelectedPicker.value = selected;
+      colorSelectedHex.value = selected;
+    }
+
+    function wireColorInput(picker, hexInput, varName) {
+      if (!picker || !hexInput) return;
+      picker.addEventListener('input', () => {
+        const v = picker.value;
+        hexInput.value = v;
+        setColorVar(varName, v);
+      });
+      hexInput.addEventListener('change', () => {
+        const v = normalizeHex(hexInput.value);
+        if (v) {
+          hexInput.value = v;
+          if (picker) picker.value = v;
+          setColorVar(varName, v);
+        } else {
+          // revert to current var
+          const cur = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+          hexInput.value = cur || '';
+        }
+      });
+    }
+
+    function renderSideInfo() {
+      const last = state.stations[state.stations.length - 1] || "";
+      const isTerminal = state.selectedStation >= state.stations.length - 1;
+      const next = state.stations[state.selectedStation + 1];
+      if (!last) {
+        sideMainEl.textContent = "";
+        return;
+      }
+      if (isTerminal) {
+        sideMainEl.textContent = `开往：${last}  　　　终点站`;
+      } else {
+        sideMainEl.textContent = `开往：${last}  　　　下一站：${next || ""}`;
+      }
+    }
+
+    function populateCurrentSelect() {
+      currentStationSelect.innerHTML = "";
+      state.stations.forEach((name, idx) => {
+        const opt = document.createElement("option");
+        opt.value = idx;
+        opt.textContent = name;
+        currentStationSelect.appendChild(opt);
+      });
+      if (state.selectedStation >= state.stations.length) {
+        state.selectedStation = Math.max(0, state.stations.length - 1);
+      }
+      currentStationSelect.value = String(state.selectedStation);
+    }
+
+    function renderState() {
+      badgeEl.textContent = state.lineName || "线路";
+      sideRouteEl.textContent = state.fare || "2-4"; // 票价数值放在细栏
+      headerInfoEl.innerHTML = `首班：${state.firstTime || ""}<br>末班：${state.lastTime || ""}`;
+      sideFareEl.textContent = "票价："; // 不再追加票价值
+      sideFareUnitEl.textContent = state.fareUnit || "元";
+      renderStations();
+      renderSideInfo();
+    }
+
+    function applyFromInputs() {
+      state.lineName = lineNameInput.value.trim() || state.lineName;
+      state.firstTime = firstTimeInput.value.trim() || state.firstTime;
+      state.lastTime = lastTimeInput.value.trim() || state.lastTime;
+      state.fare = fareInput.value.trim();
+      state.fareUnit = fareUnitInput.value.trim() || "元";
+      const stationsText = stationsInput.value
+        .split("\n")
+        .map((s) => sanitizeStationName(s.trim()))
+        .filter((s) => s.length > 0);
+      if (stationsText.length) {
+        state.stations = stationsText;
+      }
+      if (currentStationSelect.value !== "") {
+        state.selectedStation = Number(currentStationSelect.value);
+      }
+      if (state.selectedStation >= state.stations.length) {
+        state.selectedStation = Math.max(0, state.stations.length - 1);
+      }
+      populateCurrentSelect();
+      renderState();
+    }
+
+    function initInputs() {
+      lineNameInput.value = state.lineName;
+      firstTimeInput.value = state.firstTime;
+      lastTimeInput.value = state.lastTime;
+      fareInput.value = state.fare;
+      fareUnitInput.value = state.fareUnit;
+      stationsInput.value = state.stations.join("\n");
+    }
+
+    toggleBtn.addEventListener("click", () => {
+      settingsPanel.classList.toggle("open");
+    });
+
+    currentStationSelect.addEventListener("change", (e) => {
+      state.selectedStation = Number(e.target.value);
+      renderStations();
+      renderSideInfo();
+    });
+
+    applyBtn.addEventListener("click", applyFromInputs);
+
+    // 颜色控件初始化
+    initColors();
+    wireColorInput(colorBluePicker, colorBlueHex, '--blue');
+    wireColorInput(colorBadgeBgPicker, colorBadgeBgHex, '--badge-bg');
+    wireColorInput(colorBadgeTextPicker, colorBadgeTextHex, '--badge-text');
+    wireColorInput(colorSideTextPicker, colorSideTextHex, '--side-text');
+    wireColorInput(colorStationsPicker, colorStationsHex, '--stations-text');
+    wireColorInput(colorSelectedPicker, colorSelectedHex, '--selected-bg');
+
+    // 首次启动也对默认站名做一次清洗
+    state.stations = state.stations.map((s) => sanitizeStationName(s)).filter(Boolean);
+
+    initInputs();
+    populateCurrentSelect();
+    renderState();
+  </script>
+</body>
+</html>
