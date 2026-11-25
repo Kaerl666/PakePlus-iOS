@@ -974,7 +974,11 @@ class BusRecordsModal {
             scrollTop: 0,
             processedRecords: [], // 处理后的记录
             lastRenderRange: { start: -1, end: -1 }, // 上次渲染的范围
-            debutBusIds: new Set() // 今日首秀车号集合
+            debutBusIds: new Set(), // 今日首秀车号集合
+            contentTbody: null, // 虚拟滚动的内容 tbody（同一 table 内的第二个 tbody）
+            spacerTbody: null, // 虚拟滚动的占位 tbody
+            table: null, // 所在的 table
+            resizeHandler: null // 视口尺寸变化的监听函数
         };
         this.todayDebutMode = false; // 今日首秀筛选模式
         // 缓存处理结果
@@ -1135,7 +1139,11 @@ class BusRecordsModal {
                     border: 0.2vw solid #888;
                     width: 90%;
                     max-width: 90vw;
-                    max-height: 85vh;
+                    /* 用 --app-vh（真实可见高度）而不是 85vh：
+                       iOS 的 100vh 是地址栏收起时的最大视口高度，比实际可见区大，
+                       直接用 vh 会让弹窗比屏幕还高，顶部被切掉。
+                       --app-vh 由 index.html 中的 visualViewport 逻辑实时写入。 */
+                    max-height: calc(var(--app-vh, 100vh) * 0.85);
                     border-radius: 2vw;
                     overflow: hidden;
                     display: flex;
@@ -1382,7 +1390,51 @@ class BusRecordsModal {
                     overflow-y: auto;
                     border: 0.2vw solid #ddd;
                     border-radius: 1vw;
+                    /* 虚拟滚动的内容 tbody 以本容器为绝对定位基准 */
+                    position: relative;
+                    overflow-x: hidden;
                 }
+
+                /* 虚拟滚动用的占位 tbody：
+                   只放一个高度 = 记录总高度的空行，
+                   专门把容器撑出可滚动的高度，本身不可见。 */
+                .records-placeholder-body td {
+                    padding: 0 !important;
+                    border: none !important;
+                }
+
+                /* 虚拟滚动的内容 tbody：
+                   与占位 tbody 同属一张 table，是合法的第二个 tbody。
+                   绝对定位到表格起点，再用 transform 平移到对应滚动位置。
+                   transform 只影响绘制、不触发布局，因此不会抖动，
+                   也不会脱离弹窗跑到页面内容上。
+
+                   注意：绝对定位的 <tbody> 会脱离表格的列宽算法，
+                   单元格会退化成「按内容自适应」而变得很窄。
+                   所以这里必须显式声明 display:table + 固定宽度，
+                   并给单元格设定与表头一致的百分比列宽。 */
+                .records-virtual-body {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    display: table;
+                    table-layout: fixed;
+                    width: 100%;
+                    z-index: 2;
+                    background-color: #fefefe;
+                }
+
+                /* 内容 tbody 里的单元格样式见下方
+                   「.records-table td, .records-virtual-body td」合并规则，
+                   这样媒体查询的字号/内边距改动能同时作用到两者。 */
+
+                .records-virtual-body tr {
+                    display: table-row;
+                }
+
+                .records-virtual-body td:nth-child(1) { width: 30%; }
+                .records-virtual-body td:nth-child(2) { width: 45%; }
+                .records-virtual-body td:nth-child(3) { width: 25%; }
 
                 .records-table {
                     width: 100%;
@@ -1427,6 +1479,28 @@ class BusRecordsModal {
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
+                }
+
+                /* 内容 tbody 里的单元格必须和普通表格的 td 完全一致。
+                   这里把 .records-virtual-body td 也纳入同一条选择器，
+                   这样 @media (max-width: 480px) 里的
+                   「font-size: 3vw; padding: 1.2vw 0.8vw」
+                   也会同时作用到虚拟滚动的行上。
+                   否则虚拟行会保持 4vw/1.5vw，
+                   而测量行高时用的是 .records-table td 的 3vw/1.2vw，
+                   两者不一致会造成滚动偏移错位，
+                   表现为「显示的记录与实际位置对不上」。 */
+                .records-table td,
+                .records-virtual-body td {
+                    display: table-cell;
+                    padding: 1.5vw 1vw;
+                    border-bottom: 0.2vw solid #eee;
+                    font-size: 4vw;
+                    font-family: 'FZH', sans-serif;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    vertical-align: middle;
                 }
 
                 .records-table td:nth-child(1),
@@ -1544,7 +1618,8 @@ class BusRecordsModal {
                     .bus-records-content {
                         margin: 2% auto;
                         width: 95%;
-                        max-height: 95vh;
+                        /* 同上：手机上更容易触发 iOS 的 vh 溢出问题 */
+                        max-height: calc(var(--app-vh, 100vh) * 0.95);
                     }
 
                     .storage-info span {
@@ -1810,6 +1885,10 @@ class BusRecordsModal {
         
         // 先显示加载提示
         if (tbody) {
+            // 打开前先清掉可能残留的虚拟滚动内容 tbody
+            this.cleanupVirtualScrollBody();
+            tbody.className = '';
+            tbody.style.transform = '';
             tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #666; padding: 20px;">加载中...</td></tr>';
         }
         if (statsInfo) {
@@ -1862,6 +1941,10 @@ class BusRecordsModal {
             }
             this.scrollListener = null;
         }
+        
+        // 清理虚拟滚动遗留的内容 tbody
+        // （内容 tbody 是表格的兄弟节点，不在表格内部，必须单独移除）
+        this.cleanupVirtualScrollBody();
         
         // 重置滚动位置
         const container = document.querySelector('.records-table-container');
@@ -2122,17 +2205,34 @@ class BusRecordsModal {
     displayDebutRecords(records) {
         const tbody = document.getElementById('recordsTableBody');
         if (!tbody) return;
+        const debutContainer = tbody.closest('.records-table-container');
         if (records.length === 0) {
+            // 空列表时也要清掉可能残留的虚拟滚动内容 tbody
+            this.cleanupVirtualScrollBody();
+            tbody.className = '';
+            tbody.style.transform = '';
+            tbody.style.position = '';
             tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #666;">今日暂无记录</td></tr>';
+            if (debutContainer) debutContainer.scrollTop = 0;
             return;
         }
+        // 之前若启用过虚拟滚动，需先移除残留的内容 tbody，
+        // 否则它会继续以绝对定位浮在表格上方。
+        this.cleanupVirtualScrollBody();
+        this.virtualScrolling.lastRenderRange = { start: -1, end: -1 };
+
         tbody.innerHTML = '';
+        tbody.className = '';
+        tbody.style.transform = '';
+        tbody.style.position = '';
         const fragment = document.createDocumentFragment();
         records.forEach(record => {
             const row = this.createRecordRow(record);
             fragment.appendChild(row);
         });
         tbody.appendChild(fragment);
+        // 搜索结果变了，滚动位置必须归零，否则显示的不是第一条结果
+        if (debutContainer) debutContainer.scrollTop = 0;
     }
 
     performSearch() {
@@ -2190,8 +2290,21 @@ class BusRecordsModal {
     }
 
     // 生成记录的哈希值，用于判断数据是否变化
+    //
+    // 注意：这里必须能区分「不同的搜索结果集合」。
+    // 之前只用「条数 + 首条 id + 末条 id」，
+    // 两组不同的搜索结果完全可能长度相同、首末 id 也相同
+    // （比如都从同一条记录开始、到同一条记录结束），
+    // 这时就会误命中缓存，把上一次搜索的处理结果当成这次的，
+    // 表现为「搜索出来的记录和列表里显示的对不上」。
+    // 改为把每条记录的 id 都算进哈希，保证结果集合唯一。
     getRecordsHash(records) {
-        return `${records.length}_${records[0]?.id || ''}_${records[records.length - 1]?.id || ''}`;
+        if (!records || records.length === 0) return 'empty';
+        let hash = records.length;
+        for (let i = 0; i < records.length; i++) {
+            hash = (hash * 31 + (records[i]?.id || 0)) | 0;
+        }
+        return 'h' + hash;
     }
 
     // 清除所有缓存
@@ -2290,9 +2403,18 @@ class BusRecordsModal {
 
     displayRecords(records) {
         const tbody = document.getElementById('recordsTableBody');
+        if (!tbody) return;
         
         if (records.length === 0) {
+            // 空列表时也要清掉可能残留的虚拟滚动内容 tbody
+            this.cleanupVirtualScrollBody();
+            tbody.className = '';
+            tbody.style.transform = '';
+            tbody.style.position = '';
             tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #666;">暂无记录</td></tr>';
+            // 结果为空后容器可能停在旧位置，一并归零
+            const emptyContainer = tbody.closest('.records-table-container');
+            if (emptyContainer) emptyContainer.scrollTop = 0;
             return;
         }
 
@@ -2309,10 +2431,22 @@ class BusRecordsModal {
         this.virtualScrolling.processedRecords = processedRecords;
         this.setupVirtualScrolling(tbody);
     }
-
     // 直接渲染所有记录（记录少时使用）
     renderAllRecords(tbody, processedRecords) {
+        // 之前若启用过虚拟滚动，需先移除残留的内容 tbody，
+        // 否则它会继续以绝对定位浮在表格上方。
+        this.cleanupVirtualScrollBody();
+        this.virtualScrolling.lastRenderRange = { start: -1, end: -1 };
+
+        // 必须清掉占位 tbody 留下的痕迹：
+        //   className = 'records-placeholder-body' 会让所有 td 的
+        //   padding 被 `padding: 0 !important` 压成 0（行变得很扁）；
+        //   残留的 transform 则会让整张表整体错位。
+        tbody.className = '';
+        tbody.style.transform = '';
+        tbody.style.position = '';
         tbody.innerHTML = '';
+
         const fragment = document.createDocumentFragment();
         
         processedRecords.forEach(record => {
@@ -2321,6 +2455,13 @@ class BusRecordsModal {
         });
         
         tbody.appendChild(fragment);
+
+        // 结果变少后，容器可能仍停在旧的滚动位置（甚至超出新内容高度），
+        // 必须回到顶部，否则屏幕上看到的不是第一条搜索结果。
+        const container = tbody.closest('.records-table-container');
+        if (container) {
+            container.scrollTop = 0;
+        }
     }
 
     // 创建单个记录行
@@ -2342,91 +2483,251 @@ class BusRecordsModal {
         return row;
     }
 
+    // 清理虚拟滚动产生的「内容 tbody」
+    // 虚拟滚动时，内容 tbody 是 <table> 内的第二个 tbody，
+    // 关闭弹窗或重新渲染数据时必须把它移除，否则会残留空行。
+    cleanupVirtualScrollBody() {
+        const vs = this.virtualScrolling;
+        if (vs && vs.contentTbody && vs.contentTbody.parentNode) {
+            vs.contentTbody.parentNode.removeChild(vs.contentTbody);
+        }
+        // 【兜底】把表格里残留的所有 .records-virtual-body 全部移除。
+        // 正常情况下 contentTbody 只有一个，但一旦因为异常路径
+        // （例如连续搜索时中途抛错）留下了多余的，
+        // 它们会同时绝对定位显示在表格上，造成记录重叠错乱。
+        const table = vs && vs.table ? vs.table : document.getElementById('recordsTableBody')?.parentElement;
+        if (table) {
+            const leftovers = table.querySelectorAll('.records-virtual-body');
+            leftovers.forEach(el => {
+                if (el.parentNode) el.parentNode.removeChild(el);
+            });
+        }
+        if (vs) {
+            vs.contentTbody = null;
+            // 占位 tbody 也要清空，避免残留超高占位行
+            if (vs.spacerTbody) {
+                vs.spacerTbody.innerHTML = '';
+                vs.spacerTbody.className = '';
+                vs.spacerTbody.style.transform = '';
+                vs.spacerTbody.style.position = '';
+            }
+            vs.spacerTbody = null;
+            vs.table = null;
+            // 移除视口尺寸变化的监听
+            if (vs.resizeHandler) {
+                window.removeEventListener('resize', vs.resizeHandler);
+                vs.resizeHandler = null;
+            }
+        }
+    }
+
     // 设置虚拟滚动
+    //
+    // 【原实现的 bug】
+    // 原代码往 <tbody> 里 appendChild 了一个 <div>，再给这个 div 设
+    // position:absolute 来做偏移。但 <div> 是 <tbody> 的非法子元素，
+    // 浏览器会把它「foster parenting」提升到 <table> 之外，
+    // 于是绝对定位的表格脱离了弹窗的裁剪范围，直接压在页面内容上；
+    // 同时 <tbody> 的占位高度也失效，列表无法滚动。
+    // Chrome 对这种非法结构的容错表现与 iOS Safari 不同，
+    // 所以只有 iOS 上「数据量大时」才崩。
+    //
+    // 【现在的实现】
+    // 全部使用合法的表格结构，各浏览器行为一致：
+    //   - 同一个 <table> 内的两个 <tbody>（HTML 允许 table 有多个 tbody）
+    //   - 第一个 tbody 是「占位 tbody」：一个高度 = 记录总高度的空行，
+    //     专门用来把容器撑出可滚动的高度
+    //   - 第二个 tbody 是「内容 tbody」：只渲染可见区域的行，
+    //     用 transform: translateY() 平移到对应的滚动位置
+    //   transform 只影响绘制、不触发布局，比改 top 稳定，
+    //   也不会像原来那样脱离弹窗。
     setupVirtualScrolling(tbody) {
         const container = tbody.closest('.records-table-container');
         const processedRecords = this.virtualScrolling.processedRecords;
-        
+        if (!container || !processedRecords.length) return;
+
         // 清理旧的滚动监听器
         if (this.scrollListener) {
             container.removeEventListener('scroll', this.scrollListener);
             this.scrollListener = null;
         }
-        
+
         // 重置虚拟滚动状态
         this.virtualScrolling.lastRenderRange = { start: -1, end: -1 };
-        
-        // 动态计算行高（如果还没计算过）
-        if (!this.virtualScrolling.itemHeight) {
-            // 临时渲染一行来测量高度
-            tbody.innerHTML = '';
-            const tempRow = this.createRecordRow(processedRecords[0]);
-            tbody.appendChild(tempRow);
-            this.virtualScrolling.itemHeight = tempRow.offsetHeight;
-            tbody.innerHTML = '';
-        }
 
-        const itemHeight = this.virtualScrolling.itemHeight;
-        const totalHeight = processedRecords.length * itemHeight;
-        
-        // 创建占位容器
-        tbody.innerHTML = `<tr><td colspan="3" style="height: ${totalHeight}px; padding: 0; border: none;"></td></tr>`;
-        
-        // 创建实际内容容器
-        const contentWrapper = document.createElement('div');
-        contentWrapper.style.position = 'absolute';
-        contentWrapper.style.width = '100%';
-        contentWrapper.style.top = '0';
-        contentWrapper.style.left = '0';
-        tbody.style.position = 'relative';
-        
-        const contentTable = document.createElement('table');
-        contentTable.className = 'records-table';
-        contentTable.style.width = '100%';
+        // 【关键】必须先移除上一次遗留的「内容 tbody」。
+        // 否则连续两次搜索（两次结果都超过 50 条、都会走虚拟滚动）时，
+        // 表格里会同时存在两个 .records-virtual-body：
+        // 它们都是 position:absolute，都会显示在表格上，
+        // 于是屏幕上看到的是两层记录叠在一起，
+        // 表现为「搜索结果和显示的记录不一致」「显示了不相关的记录」。
+        // iOS Safari 上因为滚动/渲染时序不同，更容易连续触发这个问题。
+        this.cleanupVirtualScrollBody();
+
+        // 清空原 tbody，重建为「占位 tbody」
+        tbody.innerHTML = '';
+        tbody.className = 'records-placeholder-body';
+        tbody.style.transform = '';
+        tbody.style.position = '';
+
+        const table = tbody.parentElement;
+        if (!table) return;
+
+        // 内容 tbody：同一张 table 内的第二个 tbody（合法结构）
         const contentTbody = document.createElement('tbody');
-        contentTable.appendChild(contentTbody);
-        contentWrapper.appendChild(contentTable);
-        tbody.appendChild(contentWrapper);
-        
+        contentTbody.className = 'records-virtual-body';
+        table.appendChild(contentTbody);
+
+        // 行高必须从「真正渲染出来的虚拟行」上测量。
+        // 之前是在原 tbody 里插一行临时行来测量，
+        // 而临时行属于 .records-table（受媒体查询影响），
+        // 实际渲染的行属于 .records-virtual-body（当时未被媒体查询覆盖），
+        // 两者高度不一致，导致滚动偏移逐渐错位、
+        // 屏幕上显示的记录与实际位置对不上。
+        // 这里先渲染一行到 contentTbody 里量高度，保证量到的就是真实高度。
+        const measureItemHeight = () => {
+            const probeRow = this.createRecordRow(processedRecords[0]);
+            contentTbody.innerHTML = '';
+            contentTbody.appendChild(probeRow);
+            const h = probeRow.getBoundingClientRect().height
+                   || probeRow.offsetHeight
+                   || 0;
+            contentTbody.innerHTML = '';
+            return h > 0 ? h : (this.virtualScrolling.itemHeight || 1);
+        };
+
+        const itemHeight = measureItemHeight();
+        this.virtualScrolling.itemHeight = itemHeight;
+        const totalHeight = processedRecords.length * itemHeight;
+
+        const spacerRow = document.createElement('tr');
+        spacerRow.setAttribute('aria-hidden', 'true');
+        const spacerCell = document.createElement('td');
+        spacerCell.colSpan = 3;
+        spacerCell.style.height = totalHeight + 'px';
+        spacerCell.style.padding = '0';
+        spacerCell.style.border = 'none';
+        spacerRow.appendChild(spacerCell);
+        tbody.appendChild(spacerRow);
+
+        // 内容 tbody 是绝对定位，基准是 .records-table-container（position:relative），
+        // 但表格本体在 thead（表头）下方才开始，
+        // 所以要测出「表头底部」相对容器的偏移，作为内容层的起点，
+        // 否则第一行会盖在表头上。
+        const getContentTopOffset = () => {
+            const thead = table.querySelector('thead');
+            if (!thead) return 0;
+            const containerRect = container.getBoundingClientRect();
+            const headRect = thead.getBoundingClientRect();
+            return Math.max(0, headRect.bottom - containerRect.top);
+        };
+
+        // 内容 tbody 脱离了表格的列宽算法，必须显式给出与表格等宽的宽度，
+        // 否则 display:table 的列宽会退化成按内容自适应，导致每列都很窄。
+        const syncContentWidth = () => {
+            const tableWidth = table.getBoundingClientRect().width;
+            const containerWidth = container.clientWidth;
+            // 表格宽度可能因为出现横向滚动条而与容器有细微差异，
+            // 这里以容器宽度为准，保证 30%/45%/25% 的百分比列宽与表头完全对齐。
+            const w = containerWidth || tableWidth;
+            if (w > 0) {
+                contentTbody.style.width = w + 'px';
+            }
+        };
+        syncContentWidth();
+        contentTbody.style.top = getContentTopOffset() + 'px';
+
         // 渲染可见区域
+        //
+        // forceFromStart：强制从第 0 条开始渲染，不依赖 container.scrollTop。
+        // 搜索换一批数据后必须这样处理，因为 iOS Safari 上
+        // `container.scrollTop = 0` 是异步提交的，
+        // 紧接着读 container.scrollTop 拿到的仍是旧值（例如 2000），
+        // 于是 startIndex 按旧偏移算出来，
+        // 屏幕上显示的是新结果集里「中间某几条」，
+        // 看起来就像「搜索结果和显示的记录对不上」。
+        // 所以搜索/换数据后的首次渲染一律从 0 开始，并强制清掉 transform 偏移。
+        let forceFromStart = true;
+
         const renderVisibleRecords = () => {
-            const scrollTop = container.scrollTop;
-            const containerHeight = container.clientHeight;
-            
+            const scrollTop = forceFromStart ? 0 : container.scrollTop;
+            const containerHeight = container.clientHeight || 1;
+
+            // 窗口尺寸变化（iOS 地址栏收起/展开）后表头高度可能改变，
+            // 重新校准内容层的起点与宽度，避免与表头错位或列宽失准。
+            contentTbody.style.top = getContentTopOffset() + 'px';
+            syncContentWidth();
+
             // 计算可见范围
             const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - this.virtualScrolling.bufferCount);
             const endIndex = Math.min(
                 processedRecords.length,
                 Math.ceil((scrollTop + containerHeight) / itemHeight) + this.virtualScrolling.bufferCount
             );
-            
+
             // 如果范围没有变化，不重新渲染
-            if (this.virtualScrolling.lastRenderRange.start === startIndex && 
+            if (this.virtualScrolling.lastRenderRange.start === startIndex &&
                 this.virtualScrolling.lastRenderRange.end === endIndex) {
+                // 但如果还处在「强制从头」状态，必须把 transform 归零，
+                // 否则上一次渲染残留的 translateY 偏移会作用在新数据上，
+                // 导致整张表整体错位。
+                if (forceFromStart) {
+                    contentTbody.style.transform = 'translateY(0px)';
+                    forceFromStart = false;
+                }
                 return;
             }
-            
+
             this.virtualScrolling.lastRenderRange = { start: startIndex, end: endIndex };
-            
+
             // 清空并渲染新的可见记录
             contentTbody.innerHTML = '';
             const fragment = document.createDocumentFragment();
-            
+
             for (let i = startIndex; i < endIndex; i++) {
                 const record = processedRecords[i];
                 const row = this.createRecordRow(record);
                 fragment.appendChild(row);
             }
-            
+
             contentTbody.appendChild(fragment);
-            
-            // 调整位置
-            contentWrapper.style.transform = `translateY(${startIndex * itemHeight}px)`;
+
+            // 调整位置：内容 tbody 整体平移到可见区域对应的偏移。
+            // 内容 tbody 绝对定位在表格起点（top:0），因此向下平移
+            // startIndex * itemHeight 就能让第一行正好落在滚动位置对应处。
+            contentTbody.style.transform = 'translateY(' + (startIndex * itemHeight) + 'px)';
+            forceFromStart = false;
         };
-        
+
+        // 重置滚动位置。
+        // 搜索出新结果后，列表内容已经变了（条数、行高都可能变），
+        // 必须回到顶部从第一条开始显示；
+        // 否则会停在上一次的滚动偏移上，
+        // 屏幕上第一条显示的是中间某条记录，
+        // 看起来就像「搜索结果和显示的记录对不上」。
+        //
+        // iOS Safari 注意：scrollTop = 0 是异步提交的，
+        // 复位后还会异步派发一个 scroll 事件。
+        // 所以这里：
+        //   1) 先把「强制从头渲染」的标记打开
+        //   2) 复位 scrollTop
+        //   3) 立即渲染一次（从第 0 条开始，transform 归零）
+        //   4) 下一帧再强制渲染一次，
+        //      确保 iOS 复位完成后不会用旧偏移再渲染一遍
+        forceFromStart = true;
+        container.scrollTop = 0;
+
         // 初始渲染
         renderVisibleRecords();
-        
+
+        // iOS 滚动复位是异步的，下一帧再强制渲染一次，
+        // 避免复位完成后的 scroll 事件用旧偏移把内容带偏。
+        requestAnimationFrame(() => {
+            forceFromStart = true;
+            this.virtualScrolling.lastRenderRange = { start: -1, end: -1 };
+            renderVisibleRecords();
+        });
+
         // 创建并保存滚动监听器（使用节流）
         let scrollTimer = null;
         this.scrollListener = () => {
@@ -2436,9 +2737,24 @@ class BusRecordsModal {
                 scrollTimer = null;
             }, 16); // 约60fps
         };
-        
+
         // 添加滚动监听
         container.addEventListener('scroll', this.scrollListener);
+
+        // 视口尺寸变化时重新渲染（iOS 地址栏收起/展开会改变表头高度）
+        if (this.virtualScrolling.resizeHandler) {
+            window.removeEventListener('resize', this.virtualScrolling.resizeHandler);
+        }
+        this.virtualScrolling.resizeHandler = () => {
+            this.virtualScrolling.lastRenderRange = { start: -1, end: -1 };
+            renderVisibleRecords();
+        };
+        window.addEventListener('resize', this.virtualScrolling.resizeHandler);
+
+        // 记录内容 tbody，便于关闭/刷新时清理
+        this.virtualScrolling.contentTbody = contentTbody;
+        this.virtualScrolling.spacerTbody = tbody;
+        this.virtualScrolling.table = table;
     }
 
     showBusHistory(busId) {
@@ -2512,7 +2828,7 @@ class BusRecordsModal {
                     border: 0.2vw solid #888;
                     width: 70%;
                     max-width: 70vw;
-                    max-height: 70vh;
+                    max-height: calc(var(--app-vh, 100vh) * 0.7);
                     border-radius: 2vw;
                     overflow: hidden;
                     display: flex;
@@ -2664,7 +2980,7 @@ class BusRecordsModal {
                     background-color: #fefefe;
                     width: 90vw;
                     max-width: 90vw;
-                    max-height: 90vh;
+                    max-height: calc(var(--app-vh, 100vh) * 0.9);
                     border-radius: 2vw;
                     padding: 3vw;
                     box-sizing: border-box;
@@ -6673,7 +6989,7 @@ class BusRecordsModal {
                     font-family: 'FZH', sans-serif;
                     box-sizing: border-box;
                     resize: none;
-                    min-height: 20vh;
+                    min-height: calc(var(--app-vh, 100vh) * 0.2);
                     line-height: 1.5;
                 }
 
@@ -6999,7 +7315,7 @@ class BusRecordsModal {
                     border: 0.2vw solid #888;
                     width: 90%;
                     max-width: 90vw;
-                    max-height: 85vh;
+                    max-height: calc(var(--app-vh, 100vh) * 0.85);
                     border-radius: 2vw;
                     overflow-y: auto;
                     overflow-x: hidden;
@@ -7208,7 +7524,7 @@ class BusRecordsModal {
                     .export-options-content {
                         margin: 2% auto;
                         width: 95%;
-                        max-height: 95vh;
+                        max-height: calc(var(--app-vh, 100vh) * 0.95);
                     }
                     
                     .export-options-actions {
@@ -7707,7 +8023,7 @@ class BusRecordsModal {
                     border: 0.2vw solid #888;
                     width: 90%;
                     max-width: 90vw;
-                    max-height: 85vh;
+                    max-height: calc(var(--app-vh, 100vh) * 0.85);
                     border-radius: 2vw;
                     overflow-y: auto;
                     overflow-x: hidden;
@@ -7838,7 +8154,7 @@ class BusRecordsModal {
                     border-radius: 1vw;
                     padding: 3vw;
                     background-color: #f9f9f9;
-                    max-height: 30vh;
+                    max-height: calc(var(--app-vh, 100vh) * 0.3);
                     overflow-y: auto;
                 }
 
@@ -7947,7 +8263,7 @@ class BusRecordsModal {
                     .import-content {
                         margin: 2% auto;
                         width: 95%;
-                        max-height: 95vh;
+                        max-height: calc(var(--app-vh, 100vh) * 0.95);
                     }
 
                     /* 移动端滚动条优化 */
@@ -7981,7 +8297,7 @@ class BusRecordsModal {
                     }
 
                     .available-files {
-                        max-height: 25vh;
+                        max-height: calc(var(--app-vh, 100vh) * 0.25);
                     }
 
                     .available-files-title {
@@ -8891,7 +9207,7 @@ class BusRecordsModal {
                     border: 0.2vw solid #888;
                     width: 90%;
                     max-width: 90vw;
-                    max-height: 85vh;
+                    max-height: calc(var(--app-vh, 100vh) * 0.85);
                     border-radius: 2vw;
                     overflow-y: auto;
                     overflow-x: hidden;
@@ -9027,7 +9343,7 @@ class BusRecordsModal {
                     .export-content {
                         margin: 2% auto;
                         width: 95%;
-                        max-height: 95vh;
+                        max-height: calc(var(--app-vh, 100vh) * 0.95);
                     }
 
                     .export-method-selection {
