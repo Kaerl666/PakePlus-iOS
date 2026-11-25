@@ -57,7 +57,7 @@ function injectColorPickerStyles() {
             border: 1px solid #888;
             width: 85%;
             max-width: 600px;
-            max-height: 80vh;
+            max-height: calc(var(--app-vh, 100vh) * 0.8);
             border-radius: 8px;
             font-family: 'FZH', sans-serif;
             overflow: hidden;
