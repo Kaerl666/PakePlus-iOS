@@ -4,6 +4,39 @@
  */
 
 /**
+ * 判断线路名称属于哪一类
+ *
+ * 分类规则与 sortLineList 中的排序规则保持一致：
+ *   1) 名称含「游」   -> you    （旅游/游线）
+ *   2) 名称含「环」   -> huan   （环行线路）
+ *   3) 首字母是 B     -> b      （BRT 快速公交）
+ *   4) 首字母是 A-Z   -> letter （K1、K2 等字母开头）
+ *   5) 首字符是数字   -> num    （纯数字线路，如 1、13、101）
+ *   6) 其余           -> other  （中文名、定制等）
+ *
+ * 注意：这里的取名规则与 sortLineList 一致 ——
+ * 先去掉「路」字并转成大写，再取首字符判断；
+ * 但「游」「环」的判断用原始名称（含「路」字），
+ * 因为这两个关键字本来就带「路」字（如「旅游1路」「环行线」），
+ * 去掉「路」后依然能匹配到。
+ *
+ * @param {string} lineName - 线路名称，如「13路」「BRT环行1路」「旅游1路」
+ * @returns {string} 分类标识：'you' | 'huan' | 'b' | 'letter' | 'num' | 'other'
+ */
+function getLineCategory(lineName) {
+    var raw = String(lineName || '');
+    var name = raw.replace("路", "").toUpperCase();
+    var firstChar = name.charAt(0);
+
+    if (raw.includes("游")) return "you";
+    if (raw.includes("环")) return "huan";
+    if (firstChar === "B") return "b";
+    if (/[A-Z]/.test(firstChar)) return "letter";
+    if (/\d/.test(firstChar)) return "num";
+    return "other";
+}
+
+/**
  * 对线路列表进行分类和排序
  * @param {Array} lineList - 原始线路列表
  * @returns {Array} 排序后的线路列表
@@ -111,12 +144,14 @@ function processLineData(lineList, getLocation) {
 if (typeof window !== 'undefined') {
     window.sortLineList = sortLineList;
     window.processLineData = processLineData;
+    window.getLineCategory = getLineCategory;
 }
 
 // 如果在Node.js环境中，导出模块
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         sortLineList: sortLineList,
-        processLineData: processLineData
+        processLineData: processLineData,
+        getLineCategory: getLineCategory
     };
 } 
