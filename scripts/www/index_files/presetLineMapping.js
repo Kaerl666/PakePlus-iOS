@@ -49,6 +49,12 @@ const presetLineMapping = {
         lineName: "51夜",
         lineNo: "320700302388172"
     }
+    ,
+    "50058": {
+        upLineId: "00560361568765898",
+        downLineId: "00560361647585624",
+        lineName: "专线",
+    }
 };
 
 // 导出映射表以供其他文件使用
